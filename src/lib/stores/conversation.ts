@@ -28,6 +28,25 @@ function createConversationStore() {
     subscribe,
 
     /**
+     * 펫 프로필 업데이트
+     */
+    updateProfile: (profile: Partial<ConversationState['profile']>) => {
+      update(store => {
+        store.state.profile = { ...store.state.profile, ...profile };
+
+        // hard_filters에도 반영
+        if (profile.age_fit) {
+          store.state.filters.hard_filters.age_fit = profile.age_fit;
+        }
+        if (profile.jaw_hardness_fit) {
+          store.state.filters.hard_filters.jaw_hardness_fit = profile.jaw_hardness_fit;
+        }
+
+        return store;
+      });
+    },
+
+    /**
      * 사용자 메시지 전송 및 서버 응답 처리
      */
     sendMessage: async (message: string) => {

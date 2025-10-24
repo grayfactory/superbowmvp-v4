@@ -78,16 +78,6 @@ DATABASE_URL=postgresql://postgres:password@db.xxxxx.supabase.co:5432/postgres
 npm install
 ```
 
-### 3. 데이터베이스 마이그레이션
-
-```bash
-# 스키마 생성
-npx drizzle-kit generate:pg
-
-# 마이그레이션 실행
-npx drizzle-kit push:pg
-```
-
 ### 4. 데이터베이스 시드 (선택사항)
 
 Supabase 대시보드에서 SQL 에디터를 사용하여 Product와 Context 테이블에 샘플 데이터를 삽입합니다.

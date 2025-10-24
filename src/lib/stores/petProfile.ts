@@ -1,5 +1,5 @@
 // src/lib/stores/petProfile.ts
-import { writable, get } from 'svelte/store';
+import { writable, get, type Writable } from 'svelte/store';
 import type { PetAnalysisResult, AnalyzePetResponse } from '$lib/types';
 
 interface PetProfileFormData {
@@ -8,7 +8,12 @@ interface PetProfileFormData {
   currentWeight: string;
 }
 
-function createPetProfileStore() {
+interface PetProfileStore extends Writable<PetProfileFormData> {
+  submitForm: () => Promise<PetAnalysisResult | null>;
+  reset: () => void;
+}
+
+function createPetProfileStore(): PetProfileStore {
   const { subscribe, set, update } = writable<PetProfileFormData>({
     breed: '',
     monthsOld: '',
@@ -17,6 +22,8 @@ function createPetProfileStore() {
 
   return {
     subscribe,
+    set,
+    update,
 
     /**
      * 폼 제출 및 분석

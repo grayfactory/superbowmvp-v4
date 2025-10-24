@@ -18,13 +18,11 @@
 
     if (result) {
       // 프로필 분석 성공 - state에 반영
-      $conversationStore.state.profile.age_fit = result.age_fit;
-      $conversationStore.state.profile.jaw_hardness_fit = result.jaw_hardness_fit;
-      $conversationStore.state.profile.weight_status = result.weight_status || null;
-
-      // hard_filters에도 반영
-      $conversationStore.state.filters.hard_filters.age_fit = result.age_fit;
-      $conversationStore.state.filters.hard_filters.jaw_hardness_fit = result.jaw_hardness_fit;
+      conversationStore.updateProfile({
+        age_fit: result.age_fit,
+        jaw_hardness_fit: result.jaw_hardness_fit,
+        weight_status: result.weight_status || null
+      });
 
       // 폼 숨기고 대화 시작
       showProfileForm = false;
