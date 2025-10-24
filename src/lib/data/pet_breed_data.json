@@ -1,0 +1,68 @@
+{
+  "골든리트리버": {
+    "ranges": [
+      {
+        "monthRange": [1, 11],
+        "lifeStage": "puppy",
+        "biteForceRange": [45, 160],
+        "weightRange": [2.5, 28]
+      },
+      {
+        "monthRange": [12, 84],
+        "lifeStage": "adult",
+        "biteForceRange": [160, 190],
+        "weightRange": [25, 32]
+      },
+      {
+        "monthRange": [85, 144],
+        "lifeStage": "senior",
+        "biteForceRange": [140, 180],
+        "weightRange": [24, 30]
+      }
+    ]
+  },
+  "비글": {
+    "ranges": [
+      {
+        "monthRange": [1, 11],
+        "lifeStage": "puppy",
+        "biteForceRange": [30, 100],
+        "weightRange": [1.5, 10]
+      },
+      {
+        "monthRange": [12, 108],
+        "lifeStage": "adult",
+        "biteForceRange": [100, 140],
+        "weightRange": [9, 11]
+      },
+      {
+        "monthRange": [109, 180],
+        "lifeStage": "senior",
+        "biteForceRange": [80, 120],
+        "weightRange": [8.5, 11]
+      }
+    ]
+  },
+  "포메라니안": {
+    "ranges": [
+      {
+        "monthRange": [1, 11],
+        "lifeStage": "puppy",
+        "biteForceRange": [20, 60],
+        "weightRange": [0.5, 2.5]
+      },
+      {
+        "monthRange": [12, 120],
+        "lifeStage": "adult",
+        "biteForceRange": [60, 80],
+        "weightRange": [1.8, 3.5]
+      },
+      {
+        "monthRange": [121, 192],
+        "lifeStage": "senior",
+        "biteForceRange": [50, 70],
+        "weightRange": [1.7, 3.2]
+      }
+    ]
+  }
+}
