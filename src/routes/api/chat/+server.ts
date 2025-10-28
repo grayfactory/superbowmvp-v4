@@ -1,226 +1,238 @@
 // src/routes/api/chat/+server.ts
+// Multi-stage Processing Architecture
+
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { openai } from '$lib/server/openai';
-import { queryProducts, getProductById, getContextById, getAllContexts } from '$lib/server/db/queries';
-import { logRecommendation } from '$lib/server/utils/logger';
-import { contextToHardFilters, parseOwnerPreferences } from '$lib/server/utils/context';
-import { deepMerge } from '$lib/utils/state';
-import { getSystemPrompt, getConversationPrompt } from '$lib/server/prompts';
-import {
-  UPDATE_STATE_TOOL,
-  MATCH_CONTEXT_TOOL,
-  QUERY_PRODUCTS_TOOL,
-  RANK_PRODUCTS_TOOL
-} from '$lib/server/tools';
+import { queryProducts, getProductById, getAllContexts } from '$lib/server/db/queries';
+import { getSystemPrompt, getFilterGenerationPrompt, getRankingPrompt } from '$lib/server/prompts';
 import type { ChatRequest, ChatResponse, ProductRecommendation } from '$lib/types';
 
 export const POST: RequestHandler = async ({ request }) => {
-  const { message, currentState }: ChatRequest = await request.json();
+  const { messages }: ChatRequest = await request.json();
 
   console.log('=== Chat API Request ===');
-  console.log('Message:', message);
-  console.log('CurrentState:', JSON.stringify(currentState, null, 2));
+  console.log('Messages count:', messages.length);
+  console.log('Last message:', messages[messages.length - 1]);
 
   // Context 목록 조회
   const allContexts = await getAllContexts();
   console.log('All Contexts:', allContexts.length);
 
-  // LLM 호출 with Tool Calling
-  console.log('Calling OpenAI API...');
-  const response = await openai.chat.completions.create({
-    model: "gpt-5-mini",
+  // ==========================================
+  // Stage 1: 대화 (정보 수집)
+  // ==========================================
+  console.log('[Stage 1] Conversation...');
+  const conversationResponse = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
     messages: [
-      { role: "system", content: getSystemPrompt(allContexts) },
-      { role: "user", content: message }
+      { role: 'system', content: getSystemPrompt(allContexts) },
+      ...messages
     ],
-    tools: [
-      UPDATE_STATE_TOOL,
-      MATCH_CONTEXT_TOOL,
-      QUERY_PRODUCTS_TOOL,
-      RANK_PRODUCTS_TOOL
-    ]
+    temperature: 0.7
   });
 
-  console.log('OpenAI Response:', JSON.stringify(response.choices[0], null, 2));
+  const reply = conversationResponse.choices[0].message.content || '';
+  console.log('Conversation reply:', reply);
 
-  let newState = currentState;
-  let recommendations: ProductRecommendation[] | undefined;
-  let candidateProducts: any[] = [];
+  // ==========================================
+  // Stage 2: 정보 수집 완료 감지
+  // ==========================================
+  // 완료 신호: [READY] 키워드 또는 재시도 표현
+  const isReadyForRecommendation = /\[READY\]|다시.*찾아볼게요|다시.*추천|재검색/.test(reply);
+  console.log('Ready for recommendation?', isReadyForRecommendation);
 
-  // 매 대화마다 state 업데이트를 위한 별도 LLM 호출 (강제 실행)
-  console.log('Calling OpenAI for state extraction...');
-  const stateExtractionResponse = await openai.chat.completions.create({
-    model: "gpt-5-mini",
-    messages: [
-      {
-        role: "system",
-        content: `당신은 사용자 메시지에서 정보를 추출하는 전문가입니다.
-사용자 메시지를 분석하여 update_state 도구를 호출하세요.
-
-## 현재 상태
-missing_info: ${JSON.stringify(currentState.session.missing_info)}
-user_request_history: ${JSON.stringify(currentState.session.user_request_history)}
-
-## 추출 규칙
-1. user_request_history: 기존 배열에 현재 메시지 추가 (덮어쓰지 말고 추가!)
-2. jaw_hardness_fit: "딱딱한", "부드러운", "씹는 힘" 등 → profile.jaw_hardness_fit을 "high" 또는 "low"로 설정
-3. crumb_level: "부스러기" 언급 → filters.hard_filters.crumb_level을 "low" 또는 "high"로
-4. noise_level: "소음", "조용", "시끄러" 언급 → filters.hard_filters.noise_level을 "quiet" 또는 "noisy"로
-5. shelf_stable: "상온", "냉장" 언급 → filters.hard_filters.shelf_stable을 true 또는 false로
-6. missing_info에서 수집된 항목만 제거 (나머지는 유지!)
-
-**중요:** user_request_history는 기존 배열을 유지하고 새 메시지를 추가해야 합니다!
-**중요:** missing_info는 이번에 수집한 정보만 제거하고, 나머지는 그대로 유지해야 합니다!
-
-항상 update_state를 호출하세요!`
-      },
-      { role: "user", content: `현재 메시지: "${message}"\n\n이 메시지를 분석하여 state를 업데이트하세요.` }
-    ],
-    tools: [UPDATE_STATE_TOOL],
-    tool_choice: { type: "function", function: { name: "update_state" } } // 강제로 update_state 호출
-  });
-
-  console.log('State Extraction Response:', JSON.stringify(stateExtractionResponse.choices[0], null, 2));
-
-  // State 업데이트 적용
-  if (stateExtractionResponse.choices[0].message.tool_calls) {
-    const stateToolCall = stateExtractionResponse.choices[0].message.tool_calls[0];
-    const stateUpdates = JSON.parse(stateToolCall.function.arguments);
-    newState = deepMerge(newState, stateUpdates.updates);
-    console.log('State updated from extraction:', JSON.stringify(newState, null, 2));
+  if (!isReadyForRecommendation) {
+    // 아직 정보 수집 중 → 대화만 반환
+    const chatResponse: ChatResponse = {
+      reply,
+      recommendations: undefined
+    };
+    console.log('=== Returning conversation only ===');
+    return json(chatResponse);
   }
 
-  // Tool Call 처리
-  const toolCalls = response.choices[0].message.tool_calls;
-  const toolMessages: any[] = [];
+  // [READY] 키워드 제거 (사용자에게는 보이지 않게)
+  const cleanReply = reply.replace('[READY]', '').trim();
 
-  if (toolCalls) {
-    console.log('Processing tool calls...');
-    for (const toolCall of toolCalls) {
-      const args = JSON.parse(toolCall.function.arguments);
-      let toolResult: any = { success: true };
+  // ==========================================
+  // Stage 3: 필터 생성 (Context 매칭 포함)
+  // ==========================================
+  console.log('[Stage 3] Generating filters...');
+  const conversationHistory = messages
+    .map(m => `${m.role === 'user' ? '사용자' : 'AI'}: ${m.content}`)
+    .join('');
+  
+  console.log('📝 Conversation History for Filter Generation:');
+  console.log(conversationHistory);
+  console.log('');
+  
+  const filterPrompt = getFilterGenerationPrompt(conversationHistory, allContexts);
+  console.log('🔧 Filter Generation Prompt (first 500 chars):');
+  console.log(filterPrompt.substring(0, 500) + '...');
+  console.log('');
 
-      switch (toolCall.function.name) {
-        case 'update_state':
-          // State는 이미 위에서 업데이트됨, 스킵
-          toolResult.message = 'State already updated via extraction';
-          break;
-
-        case 'match_context':
-          if (args.confidence >= 0.7 && args.selected_context_id) {
-            // Context 매칭 성공
-            const matchedContext = await getContextById(args.selected_context_id);
-            if (matchedContext) {
-              newState.context.context_id = matchedContext.context_id;
-              newState.context.occasion = matchedContext.occasion;
-              newState.context.matched = true;
-
-              // Context 규칙을 hard_filters로 변환
-              const contextFilters = contextToHardFilters(matchedContext);
-              newState.filters.hard_filters = {
-                ...newState.filters.hard_filters,
-                ...contextFilters
-              };
-
-              // owner_pref를 soft_preferences로 변환
-              const ownerPrefs = parseOwnerPreferences(matchedContext.owner_pref);
-              newState.filters.soft_preferences = [
-                ...newState.filters.soft_preferences,
-                ...ownerPrefs
-              ];
-
-              toolResult.message = `Context matched: ${matchedContext.occasion}`;
-            }
-          } else {
-            // Context 매칭 실패
-            newState.context.matched = false;
-            // missing_info에 필수 질문 추가
-            newState.session.missing_info = [
-              'jaw_hardness_fit',
-              'crumb_level',
-              'noise_level',
-              'shelf_stable',
-              'ask_soft_prefs'
-            ];
-            toolResult.message = 'Context matching failed, need more information';
-          }
-          break;
-
-        case 'query_products':
-          // 제품 쿼리
-          candidateProducts = await queryProducts(args.hard_filters);
-          toolResult.message = `Found ${candidateProducts.length} products`;
-          toolResult.products = candidateProducts;
-          break;
-
-        case 'rank_products':
-          // 4단계: 최종 추천 완료
-          const rankings = args.rankings;
-          recommendations = await Promise.all(
-            rankings.map(async (r: any) => {
-              const product = await getProductById(r.product_id);
-              if (!product) {
-                throw new Error(`Product not found: ${r.product_id}`);
-              }
-              return {
-                product,
-                score: r.score,
-                reasoning: r.reasoning
-              };
-            })
-          );
-
-          // 비동기 로그 저장 (Fire-and-Forget)
-          if (recommendations.length > 0) {
-            logRecommendation(newState, recommendations);
-          }
-
-          toolResult.message = `Ranked ${recommendations.length} products`;
-          break;
+  const filterResponse = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      { 
+        role: 'system', 
+        content: filterPrompt
+      },
+      { 
+        role: 'user', 
+        content: '위 대화를 분석하여 필터를 생성하세요. JSON만 출력하세요.' 
       }
+    ],
+    temperature: 0.3 // 낮은 temperature로 일관성 확보
+  });
 
-      // Tool 실행 결과를 메시지 배열에 추가
-      toolMessages.push({
-        role: "tool",
-        tool_call_id: toolCall.id,
-        content: JSON.stringify(toolResult)
-      });
+  const filterText = filterResponse.choices[0].message.content || '{}';
+  console.log('Filter response:', filterText);
+
+  let filters: any;
+  try {
+    // JSON 추출 (코드 블록 제거)
+    const jsonMatch = filterText.match(/\{[\s\S]*\}/);
+    filters = JSON.parse(jsonMatch ? jsonMatch[0] : filterText);
+  } catch (e) {
+    console.error('Filter parsing error:', e);
+    filters = {};
+  }
+
+  console.log('Parsed filters:', JSON.stringify(filters, null, 2));
+  
+  // 🎯 Context 매칭 결과 로그
+  if (filters.matched_context_id) {
+    console.log('');
+    console.log('✅ Context Matched!');
+    console.log(`   Context ID: ${filters.matched_context_id}`);
+    console.log(`   Context Name: ${filters.matched_context_name}`);
+  } else {
+    console.log('');
+    console.log('⚪ No Context Matched');
+  }
+  console.log('');
+
+  // LLM 출력을 HardFilters 형식으로 변환
+  const hardFilters: any = {
+    age_fit: filters.age_fit || null,
+    jaw_hardness_fit: filters.jaw_hardness_fit || null,
+    allergens_exclude: filters.allergens_to_avoid || [],  // 이름 변환
+    shelf_stable: filters.shelf_stable !== null ? filters.shelf_stable : null,
+    crumb_level: filters.crumb_level || null,
+    noise_level: filters.noise_level || null,
+    category: filters.category || null,
+    price_lte: filters.max_price || null  // 이름 변환
+  };
+  console.log('Converted to HardFilters:', JSON.stringify(hardFilters, null, 2));
+
+  // ==========================================
+  // Stage 4: 제품 쿼리
+  // ==========================================
+  console.log('[Stage 4] Querying products...');
+  const products = await queryProducts(hardFilters);
+  console.log(`Found ${products.length} products`);
+  
+  // 🔍 디버깅: 조건을 하나씩 완화해서 테스트
+  if (products.length === 0) {
+    console.log('⚠️ No products found. Testing with relaxed filters...');
+    
+    // Test 1: age_fit만
+    const test1 = await queryProducts({ age_fit: hardFilters.age_fit });
+    console.log(`  Test 1 (age_fit only): ${test1.length} products`);
+    
+    // Test 2: jaw_hardness_fit만
+    const test2 = await queryProducts({ jaw_hardness_fit: hardFilters.jaw_hardness_fit });
+    console.log(`  Test 2 (jaw only): ${test2.length} products`);
+    
+    // Test 3: age + jaw
+    const test3 = await queryProducts({ 
+      age_fit: hardFilters.age_fit,
+      jaw_hardness_fit: hardFilters.jaw_hardness_fit 
+    });
+    console.log(`  Test 3 (age + jaw): ${test3.length} products`);
+    
+    // ✅ 자동 완화: age + jaw 조합이 없으면 jaw 조건 제거
+    if (test3.length === 0 && test1.length > 0) {
+      console.log('  → Auto-relaxing: Removing jaw_hardness_fit constraint');
+      hardFilters.jaw_hardness_fit = null;
+      const relaxedProducts = await queryProducts(hardFilters);
+      console.log(`  → Relaxed query found: ${relaxedProducts.length} products`);
+      
+      if (relaxedProducts.length > 0) {
+        // 완화된 필터로 계속 진행
+        products.length = 0;
+        products.push(...relaxedProducts);
+      }
     }
   }
 
-  // Tool이 호출되었고 content가 null인 경우, LLM에게 다시 요청하여 텍스트 응답 생성
-  let finalReply = response.choices[0].message.content || '';
-
-  if (toolCalls && !finalReply) {
-    console.log('Calling OpenAI again with conversation prompt...');
-
-    // 대화 전용 프롬프트 사용
-    const conversationPrompt = getConversationPrompt(newState, message);
-    console.log('Conversation Prompt:', conversationPrompt);
-
-    const secondResponse = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      messages: [
-        { role: "system", content: conversationPrompt },
-        { role: "user", content: message }
-      ]
+  if (products.length === 0) {
+    return json({
+      reply: cleanReply + '\n\n죄송해요, 조건에 맞는 제품을 찾지 못했어요. 조건을 조금 완화해볼까요?',
+      recommendations: undefined
     });
-
-    finalReply = secondResponse.choices[0].message.content || '';
-    console.log('Second OpenAI Response:', JSON.stringify(secondResponse.choices[0], null, 2));
   }
+
+  // ==========================================
+  // Stage 5: 랭킹 (Top 3 선정)
+  // ==========================================
+  console.log('[Stage 5] Ranking products...');
+  const rankingResponse = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content: getRankingPrompt(conversationHistory, products)
+      },
+      {
+        role: 'user',
+        content: '위 제품들을 랭킹하세요. JSON만 출력하세요.'
+      }
+    ],
+    temperature: 0.5
+  });
+
+  const rankingText = rankingResponse.choices[0].message.content || '{}';
+  console.log('Ranking response:', rankingText);
+
+  let rankingData: any;
+  try {
+    const jsonMatch = rankingText.match(/\{[\s\S]*\}/);
+    rankingData = JSON.parse(jsonMatch ? jsonMatch[0] : rankingText);
+  } catch (e) {
+    console.error('Ranking parsing error:', e);
+    rankingData = { rankings: [], message: '제품을 찾았어요!' };
+  }
+
+  // ==========================================
+  // Stage 6: 최종 응답 구성
+  // ==========================================
+  const recommendations: ProductRecommendation[] = await Promise.all(
+    rankingData.rankings.slice(0, 3).map(async (r: any) => {
+      const product = products.find(p => p.product_id === r.product_id);
+      if (!product) {
+        throw new Error(`Product not found: ${r.product_id}`);
+      }
+      return {
+        product,
+        score: r.score,
+        reasoning: r.reasoning
+      };
+    })
+  );
+
+  const finalReply = rankingData.message || cleanReply;
 
   const chatResponse: ChatResponse = {
     reply: finalReply,
-    newState,
     recommendations
   };
 
   console.log('=== Chat API Response ===');
-  console.log('Reply:', chatResponse.reply);
-  console.log('NewState:', JSON.stringify(chatResponse.newState, null, 2));
-  console.log('Recommendations:', chatResponse.recommendations?.length || 0);
+  console.log('Final reply length:', finalReply.length);
+  console.log('Recommendations:', recommendations.length);
 
   return json(chatResponse);
 };

@@ -1,169 +1,67 @@
 // src/lib/server/tools.ts
-import type { ChatCompletionTool } from 'openai/resources/chat/completions';
+// Simplified Tool Definitions (v2 Architecture)
 
-/**
- * update_state Tool
- * LLM이 대화 중 state를 업데이트할 때 호출
- */
-export const UPDATE_STATE_TOOL: ChatCompletionTool = {
-  type: "function",
+export const QUERY_PRODUCTS_TOOL = {
+  type: 'function' as const,
   function: {
-    name: "update_state",
-    description: "대화 상태(state)를 업데이트합니다. 사용자 발화를 분석하여 profile, context, filters 등을 채웁니다.",
-    parameters: {
-      type: "object",
-      properties: {
-        updates: {
-          type: "object",
-          description: "업데이트할 state 필드들. 기존 state와 deep merge됩니다.",
-          properties: {
-            profile: {
-              type: "object",
-              properties: {
-                age_fit: { type: "string", enum: ["puppy", "adult", "senior"] },
-                jaw_hardness_fit: { type: "string", enum: ["low", "medium", "high"] },
-                weight_status: { type: "string", enum: ["underweight", "normal", "overweight"] },
-                allergens_exclude: { type: "array", items: { type: "string" } }
-              }
-            },
-            context: {
-              type: "object",
-              properties: {
-                context_id: { type: "string" },
-                occasion: { type: "string" },
-                matched: { type: "boolean" }
-              }
-            },
-            filters: {
-              type: "object",
-              properties: {
-                hard_filters: {
-                  type: "object",
-                  properties: {
-                    jaw_hardness_fit: { type: "string", enum: ["low", "medium", "high"] },
-                    age_fit: { type: "string", enum: ["puppy", "adult", "senior"] },
-                    allergens_exclude: { type: "array", items: { type: "string" } },
-                    shelf_stable: { type: "boolean" },
-                    crumb_level: { type: "string", enum: ["low", "medium", "high"] },
-                    noise_level: { type: "string", enum: ["low", "high"] },
-                    category: { type: "string" },
-                    price_lte: { type: "number" }
-                  }
-                },
-                soft_preferences: { type: "array", items: { type: "string" } }
-              }
-            },
-            session: {
-              type: "object",
-              properties: {
-                missing_info: { type: "array", items: { type: "string" } },
-                user_request_history: { type: "array", items: { type: "string" } }
-              }
-            }
-          }
-        }
-      },
-      required: ["updates"]
-    }
-  }
-};
+    name: 'query_products',
+    description: `제품 데이터베이스에서 필터 조건에 맞는 간식을 조회합니다.
+    
+대화를 통해 수집한 정보를 바탕으로 필터를 구성하세요:
+- age_fit: 반려견 나이대 (puppy/adult/senior)
+- jaw_hardness_fit: 씹는 힘 (low/high)
+- shelf_stable: 상온보관 가능 여부 (true/false)
+- crumb_level: 부스러기 정도 (low/high)
+- noise_level: 소음 정도 (low/high)
 
-/**
- * match_context Tool
- * Context 테이블에서 매칭을 시도할 때
- */
-export const MATCH_CONTEXT_TOOL: ChatCompletionTool = {
-  type: "function",
-  function: {
-    name: "match_context",
-    description: "사용자 발화를 Context 목록과 비교하여 가장 적합한 상황을 선택합니다.",
+매칭된 Context의 조건도 필터에 포함시키세요.`,
     parameters: {
-      type: "object",
+      type: 'object',
       properties: {
-        selected_context_id: {
-          type: "string",
-          description: "선택된 Context ID (예: 'C006'). 매칭 실패 시 null",
-          nullable: true
+        age_fit: {
+          type: 'string',
+          enum: ['puppy', 'adult', 'senior'],
+          description: '반려견 생애주기 (강아지/성견/노견)'
         },
-        confidence: {
-          type: "number",
-          description: "매칭 확신도 (0.0 ~ 1.0). 0.7 미만이면 매칭 실패로 간주",
-          minimum: 0,
-          maximum: 1
+        jaw_hardness_fit: {
+          type: 'string',
+          enum: ['low', 'high'],
+          description: '씹는 힘/치아 상태 (low=약함/부드러운, high=강함/딱딱한)'
+        },
+        shelf_stable: {
+          type: 'boolean',
+          description: '상온보관 가능 여부 (true=상온, false=냉장)'
+        },
+        crumb_level: {
+          type: 'string',
+          enum: ['low', 'high'],
+          description: '부스러기 정도 (low=적음, high=많음)'
+        },
+        noise_level: {
+          type: 'string',
+          enum: ['low', 'high'],
+          description: '소음 정도 (low=조용함, high=시끄러움)'
+        },
+        strong_aroma: {
+          type: 'boolean',
+          description: '강한 향 여부'
+        },
+        allergens_to_avoid: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '피해야 할 알러지 성분 목록'
+        },
+        max_price: {
+          type: 'number',
+          description: '최대 가격'
+        },
+        soft_preferences: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '사용자가 언급한 추가 선호사항 (저칼로리, 귀여운 모양 등)'
         }
       },
-      required: ["selected_context_id", "confidence"]
-    }
-  }
-};
-
-/**
- * query_products Tool
- * 3단계: DB 쿼리 실행
- */
-export const QUERY_PRODUCTS_TOOL: ChatCompletionTool = {
-  type: "function",
-  function: {
-    name: "query_products",
-    description: "hard_filters 조건으로 제품 DB를 쿼리합니다. null이 아닌 필터만 WHERE 조건에 사용됩니다.",
-    parameters: {
-      type: "object",
-      properties: {
-        hard_filters: {
-          type: "object",
-          description: "DB 쿼리 조건. null 값은 무시됨",
-          properties: {
-            jaw_hardness_fit: { type: "string", enum: ["low", "medium", "high"], nullable: true },
-            age_fit: { type: "string", enum: ["puppy", "adult", "senior"], nullable: true },
-            allergens_exclude: { type: "array", items: { type: "string" } },
-            shelf_stable: { type: "boolean", nullable: true },
-            crumb_level: { type: "string", enum: ["low", "medium", "high"], nullable: true },
-            noise_level: { type: "string", enum: ["low", "high"], nullable: true },
-            category: { type: "string", nullable: true },
-            price_lte: { type: "number", nullable: true }
-          }
-        }
-      },
-      required: ["hard_filters"]
-    }
-  }
-};
-
-/**
- * rank_products Tool
- * 4단계: LLM 랭킹
- */
-export const RANK_PRODUCTS_TOOL: ChatCompletionTool = {
-  type: "function",
-  function: {
-    name: "rank_products",
-    description: "후보 제품들을 soft_preferences와 pet profile 기반으로 랭킹합니다.",
-    parameters: {
-      type: "object",
-      properties: {
-        rankings: {
-          type: "array",
-          description: "랭킹 결과 (점수 높은 순으로 정렬)",
-          items: {
-            type: "object",
-            properties: {
-              product_id: { type: "string" },
-              score: {
-                type: "number",
-                minimum: 1,
-                maximum: 10,
-                description: "추천 점수 (1-10)"
-              },
-              reasoning: {
-                type: "string",
-                description: "추천 이유 (1-2문장)"
-              }
-            },
-            required: ["product_id", "score", "reasoning"]
-          }
-        }
-      },
-      required: ["rankings"]
+      required: [] // 모든 필터 optional
     }
   }
 };

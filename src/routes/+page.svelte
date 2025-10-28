@@ -1,40 +1,17 @@
 <script lang="ts">
   import { conversationStore } from '$lib/stores/conversation';
-  import { petProfileStore } from '$lib/stores/petProfile';
-  import type { PetAnalysisResult } from '$lib/types';
-  import { onMount } from 'svelte';
+  import { marked } from 'marked';
+  
+  // Markdown 설정
+  marked.setOptions({
+    breaks: true,        // 줄바꿈을 <br>로 변환
+    gfm: true,          // GitHub Flavored Markdown
+    headerIds: false,   // 헤더 ID 생성 안 함
+    mangle: false       // 이메일 난독화 안 함
+  });
 
-  let showProfileForm = true;
   let userInput = '';
-  let analysisError = '';
   let messagesContainer: HTMLElement;
-
-  // Pet Profile Form 제출
-  async function handleProfileSubmit(e: Event) {
-    e.preventDefault();
-    analysisError = '';
-
-    const result: PetAnalysisResult | null = await petProfileStore.submitForm();
-
-    if (result) {
-      // 프로필 분석 성공 - state에 반영
-      conversationStore.updateProfile({
-        age_fit: result.age_fit,
-        jaw_hardness_fit: result.jaw_hardness_fit,
-        weight_status: result.weight_status || null
-      });
-
-      // 폼 숨기고 대화 시작
-      showProfileForm = false;
-    } else {
-      analysisError = '견종 정보를 찾을 수 없습니다. 믹스견의 경우 건너뛰기를 선택해주세요.';
-    }
-  }
-
-  // 건너뛰기 (바로 대화 시작)
-  function skipProfile() {
-    showProfileForm = false;
-  }
 
   // 메시지 전송
   async function sendMessage() {
@@ -71,116 +48,66 @@
     <p>AI 기반 반려견 간식 추천 서비스</p>
   </header>
 
-  {#if showProfileForm}
-    <!-- Pet Profile Form -->
-    <div class="chat-container">
-      <div class="profile-form-container">
-        <h2>반려견 프로필</h2>
-        <p class="subtitle">우리 아이에 대해 알려주세요 (모든 항목 선택사항)</p>
+  <!-- Chat Interface -->
+  <div class="chat-container" bind:this={messagesContainer}>
+    <div class="messages">
 
-        <form on:submit={handleProfileSubmit}>
-          <div class="form-group">
-            <label for="breed">견종 <span class="optional">(선택)</span></label>
-            <input
-              id="breed"
-              type="text"
-              bind:value={$petProfileStore.breed}
-              placeholder="예: 골든리트리버, 비글, 믹스"
-            />
-            <p class="form-help">모르시면 비워두셔도 괜찮아요</p>
+      {#each $conversationStore.messages as msg}
+        <div class="message {msg.role}">
+          {@html marked(msg.content)}
+        </div>
+      {/each}
+
+      {#if $conversationStore.isLoading}
+        <div class="message assistant typing-indicator">
+          <div class="typing-dots">
+            <span></span>
+            <span></span>
+            <span></span>
           </div>
+        </div>
+      {/if}
 
-          <div class="form-group">
-            <label for="monthsOld">개월 수 <span class="optional">(선택)</span></label>
-            <input
-              id="monthsOld"
-              type="number"
-              bind:value={$petProfileStore.monthsOld}
-              placeholder="예: 24"
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="currentWeight">몸무게 <span class="optional">(선택, kg)</span></label>
-            <input
-              id="currentWeight"
-              type="number"
-              step="0.1"
-              bind:value={$petProfileStore.currentWeight}
-              placeholder="예: 12.5"
-            />
-            <p class="form-help">모르시면 견종과 나이로 추정할게요</p>
-          </div>
-
-          {#if analysisError}
-            <p class="error">{analysisError}</p>
-          {/if}
-
-          <button type="submit" class="submit-btn">간식 추천 받기</button>
-          <button type="button" class="skip-btn" on:click={skipProfile}>
-            건너뛰고 대화로 시작하기
-          </button>
-        </form>
-      </div>
-    </div>
-  {:else}
-    <!-- Chat Interface -->
-    <div class="chat-container" bind:this={messagesContainer}>
-      <div class="messages">
-        {#each $conversationStore.messages as msg}
-          <div class="message {msg.role}">
-            {msg.content}
-          </div>
-        {/each}
-
-        {#if $conversationStore.isLoading}
-          <div class="message assistant typing-indicator">
-            <div class="typing-dots">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-          </div>
-        {/if}
-
-        <!-- Recommendations Display -->
-        {#if $conversationStore.recommendations.length > 0}
+      <!-- Recommendations Display -->
+      {#if $conversationStore.recommendations.length > 0}
+        <div class="recommendations-section">
           {#each $conversationStore.recommendations as rec, index}
-            <div class="message assistant">
-              <div class="recommendation">
-                <span class="rank">#{index + 1}</span>
-                <h3>{rec.product.name}</h3>
-                <div class="price">{rec.product.price.toLocaleString()}원</div>
-                <div style="margin-top: 8px;">
-                  <strong>카테고리:</strong> {rec.product.category || 'N/A'}<br>
-                  <strong>식감:</strong> {rec.product.texture || 'N/A'}<br>
-                  <strong>연령:</strong> {rec.product.age_fit || 'N/A'}
-                </div>
-                <div class="reasoning">{rec.reasoning}</div>
+            <div class="recommendation-card">
+              <div class="rank">#{index + 1}</div>
+              <h3>{rec.product.name}</h3>
+              <div class="price">{rec.product.price.toLocaleString()}원</div>
+              <div class="product-info">
+                <div><strong>카테고리:</strong> {rec.product.category || 'N/A'}</div>
+                <div><strong>식감:</strong> {rec.product.texture || 'N/A'}</div>
+                <div><strong>연령:</strong> {rec.product.age_fit || 'N/A'}</div>
+                {#if rec.product.functional_tags && rec.product.functional_tags.length > 0}
+                  <div><strong>특징:</strong> {rec.product.functional_tags.join(', ')}</div>
+                {/if}
               </div>
+              <div class="reasoning">{rec.reasoning}</div>
             </div>
           {/each}
-        {/if}
-      </div>
+        </div>
+      {/if}
     </div>
+  </div>
 
-    <!-- Input Container -->
-    <div class="input-container">
-      <input
-        type="text"
-        bind:value={userInput}
-        on:keydown={handleKeydown}
-        placeholder="메시지를 입력하세요..."
-        disabled={$conversationStore.isLoading}
-      />
-      <button
-        on:click={sendMessage}
-        disabled={$conversationStore.isLoading || !userInput.trim()}
-      >
-        전송
-      </button>
-    </div>
-  {/if}
+  <!-- Input Container -->
+  <div class="input-container">
+    <input
+      type="text"
+      bind:value={userInput}
+      on:keydown={handleKeydown}
+      placeholder="메시지를 입력하세요..."
+      disabled={$conversationStore.isLoading}
+    />
+    <button
+      on:click={sendMessage}
+      disabled={$conversationStore.isLoading || !userInput.trim()}
+    >
+      전송
+    </button>
+  </div>
 </div>
 
 <style>
@@ -242,6 +169,28 @@
     gap: 15px;
   }
 
+  .welcome-message {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+  }
+
+  .welcome-message h2 {
+    color: #667eea;
+    margin-bottom: 15px;
+    font-size: 2rem;
+  }
+
+  .welcome-message p {
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+  }
+
+  .welcome-message .hint {
+    color: #999;
+    font-size: 0.95rem;
+  }
+
   .message {
     max-width: 70%;
     padding: 12px 18px;
@@ -274,6 +223,85 @@
     align-self: flex-start;
     border-bottom-left-radius: 4px;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Markdown 스타일 */
+  .message :global(h1),
+  .message :global(h2),
+  .message :global(h3) {
+    margin-top: 0.5em;
+    margin-bottom: 0.3em;
+    font-weight: 600;
+  }
+
+  .message :global(h1) { font-size: 1.3em; }
+  .message :global(h2) { font-size: 1.2em; }
+  .message :global(h3) { font-size: 1.1em; }
+
+  .message :global(p) {
+    margin: 0.5em 0;
+  }
+
+  .message :global(strong) {
+    font-weight: 600;
+    color: #667eea;
+  }
+
+  .message :global(em) {
+    font-style: italic;
+  }
+
+  .message :global(code) {
+    background: #f5f5f5;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+  }
+
+  .message :global(pre) {
+    background: #f5f5f5;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+  }
+
+  .message :global(pre code) {
+    background: none;
+    padding: 0;
+  }
+
+  .message :global(ul),
+  .message :global(ol) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+
+  .message :global(li) {
+    margin: 0.3em 0;
+  }
+
+  .message :global(blockquote) {
+    border-left: 3px solid #667eea;
+    padding-left: 12px;
+    margin: 0.5em 0;
+    color: #666;
+  }
+
+  .message :global(a) {
+    color: #667eea;
+    text-decoration: none;
+  }
+
+  .message :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .message :global(hr) {
+    border: none;
+    border-top: 1px solid #e0e0e0;
+    margin: 1em 0;
   }
 
   /* Typing Indicator Animation */
@@ -319,40 +347,62 @@
     }
   }
 
-  .recommendation {
+  .recommendations-section {
+    margin-top: 20px;
+  }
+
+  .recommendation-card {
     background: white;
     border-radius: 12px;
-    padding: 15px;
-    margin: 10px 0;
+    padding: 20px;
+    margin-bottom: 15px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    animation: slideIn 0.3s ease-out;
   }
 
-  .recommendation h3 {
-    color: #667eea;
-    margin-bottom: 8px;
-  }
-
-  .recommendation .rank {
+  .recommendation-card .rank {
     display: inline-block;
     background: #667eea;
     color: white;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 0.85rem;
-    margin-right: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 12px;
   }
 
-  .recommendation .price {
+  .recommendation-card h3 {
+    color: #333;
+    margin-bottom: 10px;
+    font-size: 1.3rem;
+  }
+
+  .recommendation-card .price {
     color: #e74c3c;
     font-weight: bold;
-    margin-top: 8px;
+    font-size: 1.2rem;
+    margin-bottom: 15px;
   }
 
-  .recommendation .reasoning {
+  .recommendation-card .product-info {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-size: 0.95rem;
+    line-height: 1.8;
+  }
+
+  .recommendation-card .product-info div {
+    margin-bottom: 4px;
+  }
+
+  .recommendation-card .reasoning {
     color: #555;
     font-size: 0.95rem;
-    margin-top: 8px;
     line-height: 1.6;
+    border-left: 3px solid #667eea;
+    padding-left: 12px;
   }
 
   .input-container {
@@ -400,131 +450,5 @@
   .input-container button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  /* Profile Form Styles */
-  .profile-form-container {
-    padding: 30px;
-    background: white;
-    max-width: 600px;
-    margin: 20px auto;
-    border-radius: 16px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  }
-
-  .profile-form-container h2 {
-    color: #667eea;
-    margin-bottom: 10px;
-    font-size: 1.8rem;
-    text-align: center;
-  }
-
-  .profile-form-container .subtitle {
-    text-align: center;
-    color: #666;
-    margin-bottom: 30px;
-    font-size: 0.95rem;
-  }
-
-  .form-group {
-    margin-bottom: 24px;
-  }
-
-  .form-group label {
-    display: block;
-    margin-bottom: 8px;
-    color: #333;
-    font-weight: 500;
-    font-size: 0.95rem;
-  }
-
-  .form-group label .optional {
-    color: #999;
-    font-weight: 400;
-    font-size: 0.85rem;
-    margin-left: 6px;
-  }
-
-  .form-group input {
-    width: 100%;
-    padding: 12px 16px;
-    border: 2px solid #e0e0e0;
-    border-radius: 12px;
-    font-size: 1rem;
-    font-family: inherit;
-    transition: border-color 0.3s, box-shadow 0.3s;
-    outline: none;
-  }
-
-  .form-group input:focus {
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-  }
-
-  .form-group input::placeholder {
-    color: #bbb;
-  }
-
-  .form-help {
-    font-size: 0.85rem;
-    color: #777;
-    margin-top: 6px;
-    line-height: 1.4;
-  }
-
-  .submit-btn {
-    width: 100%;
-    padding: 14px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 1.1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.3s;
-    margin-top: 10px;
-  }
-
-  .submit-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-  }
-
-  .submit-btn:active {
-    transform: translateY(0);
-  }
-
-  .submit-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .skip-btn {
-    width: 100%;
-    padding: 12px;
-    background: #f5f5f5;
-    color: #666;
-    border: 2px solid #e0e0e0;
-    border-radius: 12px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    margin-top: 10px;
-  }
-
-  .skip-btn:hover {
-    background: #e8e8e8;
-    border-color: #ccc;
-  }
-
-  .error {
-    color: #e74c3c;
-    margin: 1rem 0;
-    padding: 10px;
-    background: #ffe8e8;
-    border-radius: 8px;
-    font-size: 0.9rem;
   }
 </style>

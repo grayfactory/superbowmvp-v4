@@ -1,56 +1,35 @@
-// Export all types from state
-export * from './state';
+// ============================================
+// Simplified API Types (v2 Architecture)
+// ============================================
 
-// API Request/Response Types
-export interface ChatRequest {
-  message: string;
-  currentState: import('./state').ConversationState;
+// Standard Chat Message
+export interface Message {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
 }
 
+// API Request: Simple message array
+export interface ChatRequest {
+  messages: Message[];
+}
+
+// API Response: Reply + optional recommendations
 export interface ChatResponse {
   reply: string;
-  newState: import('./state').ConversationState;
   recommendations?: ProductRecommendation[];
 }
 
+// Product Recommendation
 export interface ProductRecommendation {
   product: Product;
   score: number; // 1-10
   reasoning: string;
 }
 
-// Pet Analyzer Types
-export interface AnalyzePetRequest {
-  breed: string;
-  monthsOld: number;
-  currentWeight?: number;
-}
+// ============================================
+// Database Types
+// ============================================
 
-export interface AnalyzePetResponse {
-  success: boolean;
-  result: PetAnalysisResult | null;
-  error?: string;
-}
-
-export interface PetAnalysisResult {
-  age_fit: 'puppy' | 'adult' | 'senior';
-  jaw_hardness_fit: 'low' | 'medium' | 'high';
-  weight_status?: 'underweight' | 'normal' | 'overweight';
-}
-
-// Log Recommendation Types
-export interface LogRecommendationRequest {
-  state: import('./state').ConversationState;
-  recommendations: ProductRecommendation[];
-}
-
-export interface LogRecommendationResponse {
-  success: boolean;
-  log_id?: string;
-  error?: string;
-}
-
-// Database Types (from schema)
 export interface Product {
   product_id: string;
   name: string;
@@ -93,7 +72,47 @@ export interface Context {
   owner_pref: string | null;
 }
 
-// Breed Data Types
+// ============================================
+// Pet Analyzer Types (Keep existing)
+// ============================================
+
+export interface AnalyzePetRequest {
+  breed: string;
+  monthsOld: number;
+  currentWeight?: number;
+}
+
+export interface AnalyzePetResponse {
+  success: boolean;
+  result: PetAnalysisResult | null;
+  error?: string;
+}
+
+export interface PetAnalysisResult {
+  age_fit: 'puppy' | 'adult' | 'senior';
+  jaw_hardness_fit: 'low' | 'medium' | 'high';
+  weight_status?: 'underweight' | 'normal' | 'overweight';
+}
+
+// ============================================
+// Logging Types (Keep existing)
+// ============================================
+
+export interface LogRecommendationRequest {
+  conversation_summary: string;
+  recommendations: ProductRecommendation[];
+}
+
+export interface LogRecommendationResponse {
+  success: boolean;
+  log_id?: string;
+  error?: string;
+}
+
+// ============================================
+// Breed Data Types (Keep existing)
+// ============================================
+
 export interface BreedDataRange {
   monthRange: [number, number];
   lifeStage: 'puppy' | 'adult' | 'senior';
