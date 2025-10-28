@@ -4,7 +4,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { openai } from '$lib/server/openai';
-import { queryProducts, getProductById, getAllContexts } from '$lib/server/db/queries';
+import { queryProducts, getProductById, getAllContexts, getContextById } from '$lib/server/db/queries';
 import { getSystemPrompt, getFilterGenerationPrompt, getRankingPrompt } from '$lib/server/prompts';
 import type { ChatRequest, ChatResponse, ProductRecommendation } from '$lib/types';
 
@@ -67,9 +67,19 @@ export const POST: RequestHandler = async ({ request }) => {
   console.log(conversationHistory);
   console.log('');
   
-  const filterPrompt = getFilterGenerationPrompt(conversationHistory, allContexts);
+  // Occasion 목록만 추출
+  const contextOccasions = allContexts.map(c => ({
+    context_id: c.context_id,
+    occasion: c.occasion
+  }));
+  
+  console.log('🎯 Available Contexts (occasions only):');
+  console.log(JSON.stringify(contextOccasions, null, 2));
+  console.log('');
+  
+  const filterPrompt = getFilterGenerationPrompt(conversationHistory, contextOccasions);
   console.log('🔧 Filter Generation Prompt (first 500 chars):');
-  console.log(filterPrompt.substring(0, 500) + '...');
+  console.log(filterPrompt);
   console.log('');
 
   const filterResponse = await openai.chat.completions.create({
@@ -102,12 +112,22 @@ export const POST: RequestHandler = async ({ request }) => {
 
   console.log('Parsed filters:', JSON.stringify(filters, null, 2));
   
-  // 🎯 Context 매칭 결과 로그
+  // 🎯 Context 매칭 처리
+  let matchedContext = null;
   if (filters.matched_context_id) {
     console.log('');
     console.log('✅ Context Matched!');
     console.log(`   Context ID: ${filters.matched_context_id}`);
-    console.log(`   Context Name: ${filters.matched_context_name}`);
+    
+    // DB에서 전체 Context 조회
+    matchedContext = await getContextById(filters.matched_context_id);
+    
+    if (matchedContext) {
+      console.log(`   Occasion: ${matchedContext.occasion}`);
+      console.log(`   Full Context:`, JSON.stringify(matchedContext, null, 2));
+    } else {
+      console.log(`   ⚠️ Context not found in DB`);
+    }
   } else {
     console.log('');
     console.log('⚪ No Context Matched');
@@ -118,52 +138,175 @@ export const POST: RequestHandler = async ({ request }) => {
   const hardFilters: any = {
     age_fit: filters.age_fit || null,
     jaw_hardness_fit: filters.jaw_hardness_fit || null,
-    allergens_exclude: filters.allergens_to_avoid || [],  // 이름 변환
-    shelf_stable: filters.shelf_stable !== null ? filters.shelf_stable : null,
-    crumb_level: filters.crumb_level || null,
-    noise_level: filters.noise_level || null,
-    category: filters.category || null,
-    price_lte: filters.max_price || null  // 이름 변환
+    allergens_exclude: filters.allergens_to_avoid || [],
+    shelf_stable: null,
+    crumb_level: null,
+    noise_level: null,
+    category: null,
+    price_lte: filters.max_price || null
   };
+  
+  // Context 조건을 필터에 반영
+  if (matchedContext) {
+    console.log('🔧 Applying Context conditions to filters...');
+    
+    // messy_ok: false → crumb_level: low
+    if (matchedContext.messy_ok === false) {
+      hardFilters.crumb_level = 'low';
+      console.log('   messy_ok: false → crumb_level: low');
+    }
+    
+    // noise_sensitive: true → noise_level: low
+    if (matchedContext.noise_sensitive === true) {
+      hardFilters.noise_level = 'low';
+      console.log('   noise_sensitive: true → noise_level: low');
+    }
+    
+    // storage: only_shelf_stable → shelf_stable: true
+    if (matchedContext.storage === 'only_shelf_stable') {
+      hardFilters.shelf_stable = true;
+      console.log('   storage: only_shelf_stable → shelf_stable: true');
+    }
+    
+    // budget_max → price_lte
+    if (matchedContext.budget_max && !hardFilters.price_lte) {
+      hardFilters.price_lte = matchedContext.budget_max;
+      console.log(`   budget_max: ${matchedContext.budget_max} → price_lte: ${matchedContext.budget_max}`);
+    }
+    
+    console.log('');
+  }
   console.log('Converted to HardFilters:', JSON.stringify(hardFilters, null, 2));
 
   // ==========================================
-  // Stage 4: 제품 쿼리
+  // Stage 4: 제품 쿼리 (이전 추천 포함)
   // ==========================================
   console.log('[Stage 4] Querying products...');
-  const products = await queryProducts(hardFilters);
-  console.log(`Found ${products.length} products`);
+
+  // 4-1: 새 필터로 제품 쿼리
+  const newProducts = await queryProducts(hardFilters);
+  console.log(`Found ${newProducts.length} new products from query`);
+
+  // 4-2: 이전 추천이 있으면 가져오기 (재추천 시나리오)
+  const previousProductIds: string[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === 'assistant' && msg.recommendations && msg.recommendations.length > 0) {
+      // 가장 최근 추천의 product_ids 추출
+      msg.recommendations.forEach(rec => {
+        previousProductIds.push(rec.product.product_id);
+      });
+      console.log(`📌 Found previous recommendations: ${previousProductIds.join(', ')}`);
+      break;
+    }
+  }
+
+  // 4-3: 이전 추천 제품들을 DB에서 다시 조회
+  let previousProducts: Product[] = [];
+  if (previousProductIds.length > 0) {
+    console.log('🔄 Re-querying previous recommendations...');
+    previousProducts = await Promise.all(
+      previousProductIds.map(id => getProductById(id))
+    ).then(results => results.filter(p => p !== null) as Product[]);
+    console.log(`   Retrieved ${previousProducts.length} previous products`);
+  }
+
+  // 4-4: 새 제품 + 이전 제품 합치기 (중복 제거)
+  const allProductsMap = new Map<string, Product>();
+  [...previousProducts, ...newProducts].forEach(p => {
+    allProductsMap.set(p.product_id, p);
+  });
+  const allCandidates = Array.from(allProductsMap.values());
+
+  console.log(`📦 Total candidates: ${allCandidates.length} (${previousProducts.length} previous + ${newProducts.length} new)`);
+
+  // 4-5: 합친 제품들을 새 필터 조건으로 재필터링 (특히 알러지!)
+  let products = allCandidates;
+  if (hardFilters.allergens_exclude && hardFilters.allergens_exclude.length > 0) {
+    console.log('🔍 Re-filtering for allergens...');
+    products = allCandidates.filter(p => {
+      for (const allergen of hardFilters.allergens_exclude!) {
+        // allergens 배열 체크
+        if (p.allergens && p.allergens.some((a: string) => a.toLowerCase().includes(allergen.toLowerCase()))) {
+          console.log(`   ❌ ${p.product_id} (${p.name}): allergen found in allergens`);
+          return false;
+        }
+        // protein_sources 체크
+        if (p.protein_sources && p.protein_sources.toLowerCase().includes(allergen.toLowerCase())) {
+          console.log(`   ❌ ${p.product_id} (${p.name}): allergen found in protein_sources`);
+          return false;
+        }
+        // ingredient 체크
+        if (p.ingredient && p.ingredient.toLowerCase().includes(allergen.toLowerCase())) {
+          console.log(`   ❌ ${p.product_id} (${p.name}): allergen found in ingredient`);
+          return false;
+        }
+        if (p.ingredient2 && p.ingredient2.toLowerCase().includes(allergen.toLowerCase())) {
+          console.log(`   ❌ ${p.product_id} (${p.name}): allergen found in ingredient2`);
+          return false;
+        }
+        if (p.ingredient3 && p.ingredient3.toLowerCase().includes(allergen.toLowerCase())) {
+          console.log(`   ❌ ${p.product_id} (${p.name}): allergen found in ingredient3`);
+          return false;
+        }
+      }
+      console.log(`   ✅ ${p.product_id} (${p.name}): no allergens`);
+      return true;
+    });
+    console.log(`   After allergen filtering: ${products.length} products`);
+  }
+
+  console.log('');
+
+  if (products.length > 0) {
+    console.log('📦 Products found:');
+    products.forEach(p => {
+      console.log(`   - ${p.product_id}: ${p.name} (${p.price}원, age: ${p.age_fit}, jaw: ${p.jaw_hardness_fit})`);
+    });
+    console.log('');
+  }
   
   // 🔍 디버깅: 조건을 하나씩 완화해서 테스트
   if (products.length === 0) {
     console.log('⚠️ No products found. Testing with relaxed filters...');
-    
-    // Test 1: age_fit만
-    const test1 = await queryProducts({ age_fit: hardFilters.age_fit });
-    console.log(`  Test 1 (age_fit only): ${test1.length} products`);
-    
-    // Test 2: jaw_hardness_fit만
-    const test2 = await queryProducts({ jaw_hardness_fit: hardFilters.jaw_hardness_fit });
-    console.log(`  Test 2 (jaw only): ${test2.length} products`);
-    
-    // Test 3: age + jaw
-    const test3 = await queryProducts({ 
+
+    // Test 1: 핵심 조건만 (age + jaw + allergens)
+    const coreFilters: any = {
       age_fit: hardFilters.age_fit,
-      jaw_hardness_fit: hardFilters.jaw_hardness_fit 
-    });
-    console.log(`  Test 3 (age + jaw): ${test3.length} products`);
-    
-    // ✅ 자동 완화: age + jaw 조합이 없으면 jaw 조건 제거
-    if (test3.length === 0 && test1.length > 0) {
-      console.log('  → Auto-relaxing: Removing jaw_hardness_fit constraint');
-      hardFilters.jaw_hardness_fit = null;
-      const relaxedProducts = await queryProducts(hardFilters);
-      console.log(`  → Relaxed query found: ${relaxedProducts.length} products`);
-      
-      if (relaxedProducts.length > 0) {
-        // 완화된 필터로 계속 진행
+      jaw_hardness_fit: hardFilters.jaw_hardness_fit,
+      allergens_exclude: hardFilters.allergens_exclude
+    };
+    const test1 = await queryProducts(coreFilters);
+    console.log(`  Test 1 (age + jaw + allergens): ${test1.length} products`);
+
+    if (test1.length > 0) {
+      console.log('  → Auto-relaxing: Removing Context-based constraints (shelf_stable, noise_level, price)');
+      products.length = 0;
+      products.push(...test1);
+    } else {
+      // Test 2: age + allergens만
+      const test2 = await queryProducts({
+        age_fit: hardFilters.age_fit,
+        allergens_exclude: hardFilters.allergens_exclude
+      });
+      console.log(`  Test 2 (age + allergens only): ${test2.length} products`);
+
+      if (test2.length > 0) {
+        console.log('  → Auto-relaxing: Removing jaw_hardness_fit constraint');
         products.length = 0;
-        products.push(...relaxedProducts);
+        products.push(...test2);
+      } else {
+        // Test 3: allergens만 (최소 조건)
+        const test3 = await queryProducts({
+          allergens_exclude: hardFilters.allergens_exclude
+        });
+        console.log(`  Test 3 (allergens only): ${test3.length} products`);
+
+        if (test3.length > 0) {
+          console.log('  → Auto-relaxing: Using allergen filter only');
+          products.length = 0;
+          products.push(...test3);
+        }
       }
     }
   }
@@ -179,12 +322,33 @@ export const POST: RequestHandler = async ({ request }) => {
   // Stage 5: 랭킹 (Top 3 선정)
   // ==========================================
   console.log('[Stage 5] Ranking products...');
+
+  // 랭킹을 위한 선호도 정보 준비
+  const ownerPref = matchedContext?.owner_pref || null;
+  const softPrefs = filters.soft_preferences || [];
+
+  // 재추천 여부 감지
+  const isReRecommendation = previousProductIds.length > 0;
+  const newConstraints: string[] = [];
+  if (isReRecommendation && hardFilters.allergens_exclude && hardFilters.allergens_exclude.length > 0) {
+    newConstraints.push(`알러지 제외: ${hardFilters.allergens_exclude.join(', ')}`);
+  }
+
+  console.log('🎯 Ranking preferences:');
+  console.log(`   Is re-recommendation: ${isReRecommendation}`);
+  if (isReRecommendation) {
+    console.log(`   New constraints: ${newConstraints.join(', ')}`);
+  }
+  console.log(`   Owner pref (from Context): ${ownerPref}`);
+  console.log(`   Soft preferences: ${JSON.stringify(softPrefs)}`);
+  console.log('');
+
   const rankingResponse = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
       {
         role: 'system',
-        content: getRankingPrompt(conversationHistory, products)
+        content: getRankingPrompt(conversationHistory, products, ownerPref, softPrefs, isReRecommendation, newConstraints)
       },
       {
         role: 'user',
@@ -204,6 +368,14 @@ export const POST: RequestHandler = async ({ request }) => {
   } catch (e) {
     console.error('Ranking parsing error:', e);
     rankingData = { rankings: [], message: '제품을 찾았어요!' };
+  }
+
+  // 🚨 Safety check: 제품이 있는데 rankings가 비어있으면 경고
+  if (products.length > 0 && (!rankingData.rankings || rankingData.rankings.length === 0)) {
+    console.error('⚠️ ERROR: Products found but LLM returned empty rankings!');
+    console.error(`   Products count: ${products.length}`);
+    console.error(`   LLM response: ${rankingText}`);
+    console.error('   This should not happen. Check ranking prompt.');
   }
 
   // ==========================================

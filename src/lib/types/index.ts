@@ -6,6 +6,7 @@
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  recommendations?: ProductRecommendation[];  // Optional: inline recommendations with this message
 }
 
 // API Request: Simple message array

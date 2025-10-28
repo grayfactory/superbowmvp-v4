@@ -6,7 +6,6 @@ import type { Message, ProductRecommendation, ChatResponse } from '$lib/types';
 
 interface ConversationStore {
   messages: Message[];
-  recommendations: ProductRecommendation[];
   isLoading: boolean;
 }
 
@@ -22,7 +21,6 @@ function createConversationStore() {
 먼저 우리 아이의 **견종**과 **나이**가 어떻게 될까요?`
       }
     ],
-    recommendations: [],
     isLoading: false
   });
 
@@ -62,16 +60,12 @@ function createConversationStore() {
         const data: ChatResponse = await response.json();
 
         update(store => {
-          // 서버 응답 메시지 추가
+          // 서버 응답 메시지 추가 (추천이 있으면 함께 인라인으로)
           store.messages.push({
             role: 'assistant',
-            content: data.reply
+            content: data.reply,
+            recommendations: data.recommendations  // Inline recommendations
           });
-
-          // 추천 결과가 있으면 저장
-          if (data.recommendations) {
-            store.recommendations = data.recommendations;
-          }
 
           store.isLoading = false;
           return store;
@@ -96,7 +90,6 @@ function createConversationStore() {
     reset: () => {
       set({
         messages: [],
-        recommendations: [],
         isLoading: false
       });
     }

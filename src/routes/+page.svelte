@@ -56,6 +56,28 @@
         <div class="message {msg.role}">
           {@html marked(msg.content)}
         </div>
+
+        <!-- Inline Recommendations (if this message has recommendations) -->
+        {#if msg.recommendations && msg.recommendations.length > 0}
+          <div class="recommendations-section">
+            {#each msg.recommendations as rec, index}
+              <div class="recommendation-card">
+                <div class="rank">#{index + 1}</div>
+                <h3>{rec.product.name}</h3>
+                <div class="price">{rec.product.price.toLocaleString()}원</div>
+                <div class="product-info">
+                  <div><strong>카테고리:</strong> {rec.product.category || 'N/A'}</div>
+                  <div><strong>식감:</strong> {rec.product.texture || 'N/A'}</div>
+                  <div><strong>연령:</strong> {rec.product.age_fit || 'N/A'}</div>
+                  {#if rec.product.functional_tags && rec.product.functional_tags.length > 0}
+                    <div><strong>특징:</strong> {rec.product.functional_tags.join(', ')}</div>
+                  {/if}
+                </div>
+                <div class="reasoning">{rec.reasoning}</div>
+              </div>
+            {/each}
+          </div>
+        {/if}
       {/each}
 
       {#if $conversationStore.isLoading}
@@ -65,28 +87,6 @@
             <span></span>
             <span></span>
           </div>
-        </div>
-      {/if}
-
-      <!-- Recommendations Display -->
-      {#if $conversationStore.recommendations.length > 0}
-        <div class="recommendations-section">
-          {#each $conversationStore.recommendations as rec, index}
-            <div class="recommendation-card">
-              <div class="rank">#{index + 1}</div>
-              <h3>{rec.product.name}</h3>
-              <div class="price">{rec.product.price.toLocaleString()}원</div>
-              <div class="product-info">
-                <div><strong>카테고리:</strong> {rec.product.category || 'N/A'}</div>
-                <div><strong>식감:</strong> {rec.product.texture || 'N/A'}</div>
-                <div><strong>연령:</strong> {rec.product.age_fit || 'N/A'}</div>
-                {#if rec.product.functional_tags && rec.product.functional_tags.length > 0}
-                  <div><strong>특징:</strong> {rec.product.functional_tags.join(', ')}</div>
-                {/if}
-              </div>
-              <div class="reasoning">{rec.reasoning}</div>
-            </div>
-          {/each}
         </div>
       {/if}
     </div>
@@ -349,15 +349,28 @@
 
   .recommendations-section {
     margin-top: 20px;
+    display: flex;
+    gap: 15px;
+    width: 100%;
+  }
+
+  /* 모바일: 세로 스택 */
+  @media (max-width: 768px) {
+    .recommendations-section {
+      flex-direction: column;
+    }
   }
 
   .recommendation-card {
     background: white;
     border-radius: 12px;
     padding: 20px;
-    margin-bottom: 15px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     animation: slideIn 0.3s ease-out;
+    flex: 1;
+    min-width: 0; /* 텍스트 오버플로우 방지 */
+    display: flex;
+    flex-direction: column;
   }
 
   .recommendation-card .rank {

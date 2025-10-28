@@ -20,10 +20,16 @@ export async function queryProducts(filters: HardFilters): Promise<Product[]> {
   }
 
   if (filters.allergens_exclude && filters.allergens_exclude.length > 0) {
-    // PostgreSQL array overlap 연산자 사용: NOT (allergens && excluded)
+    // 알러지 체크: allergens, protein_sources, ingredient 컬럼 모두 확인
     for (const allergen of filters.allergens_exclude) {
       conditions.push(
-        sql`NOT (${productTable.allergens} @> ARRAY[${allergen}]::text[])`
+        sql`(
+          (${productTable.allergens} IS NULL OR NOT (${productTable.allergens} @> ARRAY[${allergen}]::text[]))
+          AND (${productTable.protein_sources} IS NULL OR ${productTable.protein_sources} NOT ILIKE ${`%${allergen}%`})
+          AND (${productTable.ingredient} IS NULL OR ${productTable.ingredient} NOT ILIKE ${`%${allergen}%`})
+          AND (${productTable.ingredient2} IS NULL OR ${productTable.ingredient2} NOT ILIKE ${`%${allergen}%`})
+          AND (${productTable.ingredient3} IS NULL OR ${productTable.ingredient3} NOT ILIKE ${`%${allergen}%`})
+        )`
       );
     }
   }
