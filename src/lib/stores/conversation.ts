@@ -7,6 +7,7 @@ import type { Message, ProductRecommendation, ChatResponse } from '$lib/types';
 interface ConversationStore {
   messages: Message[];
   isLoading: boolean;
+  isThinking: boolean; // AI가 추천을 생성 중인 상태
 }
 
 function createConversationStore() {
@@ -21,7 +22,8 @@ function createConversationStore() {
 먼저 우리 아이의 **견종**과 **나이**가 어떻게 될까요?`
       }
     ],
-    isLoading: false
+    isLoading: false,
+    isThinking: false
   });
 
   return {
@@ -38,8 +40,19 @@ function createConversationStore() {
           content
         });
         store.isLoading = true;
+        store.isThinking = false;
         return store;
       });
+
+      // 2초 후에 isThinking 상태로 전환 (필터링, 쿼리, 랭킹 단계)
+      const thinkingTimer = setTimeout(() => {
+        update(store => {
+          if (store.isLoading) {
+            store.isThinking = true;
+          }
+          return store;
+        });
+      }, 2000);
 
       try {
         const currentMessages = get({ subscribe }).messages;
@@ -59,6 +72,8 @@ function createConversationStore() {
 
         const data: ChatResponse = await response.json();
 
+        clearTimeout(thinkingTimer);
+
         update(store => {
           // 서버 응답 메시지 추가 (추천이 있으면 함께 인라인으로)
           store.messages.push({
@@ -68,10 +83,12 @@ function createConversationStore() {
           });
 
           store.isLoading = false;
+          store.isThinking = false;
           return store;
         });
       } catch (error) {
         console.error('Chat error:', error);
+        clearTimeout(thinkingTimer);
         update(store => {
           // 에러 메시지 추가
           store.messages.push({
@@ -79,6 +96,7 @@ function createConversationStore() {
             content: '죄송해요, 오류가 발생했어요. 다시 시도해주세요.'
           });
           store.isLoading = false;
+          store.isThinking = false;
           return store;
         });
       }
@@ -90,7 +108,8 @@ function createConversationStore() {
     reset: () => {
       set({
         messages: [],
-        isLoading: false
+        isLoading: false,
+        isThinking: false
       });
     }
   };

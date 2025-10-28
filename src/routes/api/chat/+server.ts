@@ -24,12 +24,13 @@ export const POST: RequestHandler = async ({ request }) => {
   // ==========================================
   console.log('[Stage 1] Conversation...');
   const conversationResponse = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-5-mini',
     messages: [
       { role: 'system', content: getSystemPrompt(allContexts) },
       ...messages
     ],
-    temperature: 0.7
+    reasoning_effort: 'low',
+    verbosity: 'medium'
   });
 
   const reply = conversationResponse.choices[0].message.content || '';
@@ -83,18 +84,19 @@ export const POST: RequestHandler = async ({ request }) => {
   console.log('');
 
   const filterResponse = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-5-mini',
     messages: [
-      { 
-        role: 'system', 
+      {
+        role: 'system',
         content: filterPrompt
       },
-      { 
-        role: 'user', 
-        content: '위 대화를 분석하여 필터를 생성하세요. JSON만 출력하세요.' 
+      {
+        role: 'user',
+        content: '위 대화를 분석하여 필터를 생성하세요. JSON만 출력하세요.'
       }
     ],
-    temperature: 0.3 // 낮은 temperature로 일관성 확보
+    reasoning_effort: 'minimal', // 빠른 JSON 생성
+    verbosity: 'low' // 간결한 출력
   });
 
   const filterText = filterResponse.choices[0].message.content || '{}';
@@ -344,7 +346,7 @@ export const POST: RequestHandler = async ({ request }) => {
   console.log('');
 
   const rankingResponse = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-5-mini',
     messages: [
       {
         role: 'system',
@@ -355,7 +357,8 @@ export const POST: RequestHandler = async ({ request }) => {
         content: '위 제품들을 랭킹하세요. JSON만 출력하세요.'
       }
     ],
-    temperature: 0.5
+    reasoning_effort: 'medium', // 적절한 추론 필요
+    verbosity: 'medium' // 균형잡힌 출력
   });
 
   const rankingText = rankingResponse.choices[0].message.content || '{}';

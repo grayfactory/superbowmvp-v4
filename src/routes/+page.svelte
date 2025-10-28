@@ -82,11 +82,18 @@
 
       {#if $conversationStore.isLoading}
         <div class="message assistant typing-indicator">
-          <div class="typing-dots">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
+          {#if $conversationStore.isThinking}
+            <div class="thinking-message">
+              <span class="brain-icon">🤔</span>
+              <span class="thinking-text">AI가 최적의 간식을 찾고 있어요...</span>
+            </div>
+          {:else}
+            <div class="typing-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -345,6 +352,45 @@
       transform: translateY(-10px);
       opacity: 1;
     }
+  }
+
+  /* Thinking Message Animation */
+  .thinking-message {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: fadeIn 0.3s ease-in;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .brain-icon {
+    font-size: 1.5rem;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.2);
+    }
+  }
+
+  .thinking-text {
+    color: #667eea;
+    font-weight: 500;
+    font-size: 0.95rem;
   }
 
   .recommendations-section {

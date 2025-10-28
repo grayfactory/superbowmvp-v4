@@ -160,7 +160,13 @@ ${JSON.stringify(products.map(p => ({
   functional_tags: p.functional_tags,
   crumb_level: p.crumb_level,
   noise_level: p.noise_level,
-  strong_aroma: p.strong_aroma
+  strong_aroma: p.strong_aroma,
+  // 영양 성분 (%)
+  protein_percent: p.protein_percent,
+  moisture_percent: p.moisture_percent,
+  fiber_percent: p.fiber_percent,
+  ash_percent: p.ash_percent,
+  fat_percent: p.fat_percent
 })), null, 2)}
 
 ## 작업
@@ -173,7 +179,12 @@ ${JSON.stringify(products.map(p => ({
    - 예: "지저분한건 싫어요" → crumb_level: low 우선
 2. **필수 조건 만족도** (나이, 씹는 힘, 알러지 - 이미 필터링됨)
 3. **사용 상황 적합성** (대화에서 파악된 상황)
-4. **가격 대비 가치**
+4. **영양학적 가치** (영양 성분 고려)
+   - **고단백**: protein_percent 높음 (60% 이상 우수)
+   - **저지방**: fat_percent 낮음 (다이어트/비만 관리)
+   - **식이섬유**: fiber_percent 고려 (소화 건강)
+   - **수분함량**: moisture_percent (소프트/하드 간식 특성)
+5. **가격 대비 가치**
 
 ### 응답 형식
 **모든 후보 제품을 점수 순으로 랭킹하세요**
@@ -206,7 +217,11 @@ ${JSON.stringify(products.map(p => ({
 - JSON만 출력하세요 (추가 설명 없이)
 - **제품 1개든 2개든 3개든, 모든 제품을 rankings에 포함**하세요
 - 제품이 0개일 경우에만 rankings: [] 빈 배열
-- reasoning은 친근하고 구체적으로 작성
+- **reasoning 작성 가이드**:
+  * 친근하고 구체적으로 작성 (2-3문장)
+  * 영양 성분 정보를 자연스럽게 포함 (예: "단백질 65%로 영양가가 높아요")
+  * 특징적인 영양소가 있다면 언급 (고단백, 저지방, 식이섬유 풍부 등)
+  * 사용자 요구사항과 연결 (예: "다이어트에 좋은 저지방 간식이에요")
 - message는 대화 맥락에 맞게 자연스럽게
 ${isReRecommendation ? '- **재추천 시 message에 새 제약사항을 명시**하세요' : ''}`;
 }
