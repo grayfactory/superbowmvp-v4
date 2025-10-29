@@ -1,5 +1,5 @@
 // src/lib/server/db/queries.ts
-import { db } from './client';
+import { getDb } from './client';
 import { productTable, contextTable } from './schema';
 import { and, eq, lte, sql } from 'drizzle-orm';
 import type { HardFilters, Product, Context } from '$lib/types';
@@ -56,8 +56,8 @@ export async function queryProducts(filters: HardFilters): Promise<Product[]> {
 
   // 조건이 없으면 전체 조회 (최대 50개 제한)
   const query = conditions.length > 0
-    ? db.select().from(productTable).where(and(...conditions)).limit(50)
-    : db.select().from(productTable).limit(50);
+    ? getDb().select().from(productTable).where(and(...conditions)).limit(50)
+    : getDb().select().from(productTable).limit(50);
 
   return await query;
 }
@@ -66,7 +66,7 @@ export async function queryProducts(filters: HardFilters): Promise<Product[]> {
  * Product ID로 단일 제품 조회
  */
 export async function getProductById(productId: string): Promise<Product | null> {
-  const results = await db
+  const results = await getDb()
     .select()
     .from(productTable)
     .where(eq(productTable.product_id, productId))
@@ -79,14 +79,14 @@ export async function getProductById(productId: string): Promise<Product | null>
  * 모든 Context 조회
  */
 export async function getAllContexts(): Promise<Context[]> {
-  return await db.select().from(contextTable);
+  return await getDb().select().from(contextTable);
 }
 
 /**
  * Context ID로 단일 Context 조회
  */
 export async function getContextById(contextId: string): Promise<Context | null> {
-  const results = await db
+  const results = await getDb()
     .select()
     .from(contextTable)
     .where(eq(contextTable.context_id, contextId))

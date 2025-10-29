@@ -3,16 +3,19 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema';
 
-// Get DATABASE_URL from process.env (works with Vercel dev)
-const DATABASE_URL = process.env.DATABASE_URL;
+let dbInstance: ReturnType<typeof drizzle> | null = null;
 
-// Validate environment variable
-if (!DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable must be set');
+export function getDb() {
+  if (!dbInstance) {
+    const DATABASE_URL = process.env.DATABASE_URL;
+
+    if (!DATABASE_URL) {
+      throw new Error('DATABASE_URL environment variable must be set');
+    }
+
+    const client = postgres(DATABASE_URL);
+    dbInstance = drizzle(client, { schema });
+  }
+
+  return dbInstance;
 }
-
-// Create postgres client
-const client = postgres(DATABASE_URL);
-
-// Create drizzle instance
-export const db = drizzle(client, { schema });
